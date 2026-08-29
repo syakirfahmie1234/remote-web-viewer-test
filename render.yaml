@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: remote-website-relay
+    runtime: python
+    buildCommand: pip install -r requirements-server.txt
+    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        generateValue: false
+      - key: WORKER_TOKEN
+        sync: false
+      - key: CONTROLLER_TOKEN
+        sync: false
+      - key: TARGET_DOMAIN
+        sync: false
+      - key: ZSTD_LEVEL
+        value: "3"
+      - key: SESSION_TIMEOUT_SECONDS
+        value: "3600"
+      - key: CONTROLLER_ALLOWED_WORKERS
+        value: ""

@@ -1,0 +1,43 @@
+[build-system]
+requires = ['setuptools>=61.0']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'remote-website'
+version = '1.0.0'
+description = 'High-performance real-time remote website automation and DOM synchronization relay'
+readme = 'README.md'
+requires-python = '>=3.10'
+dependencies = [
+    'fastapi>=0.110.0',
+    'uvicorn[standard]>=0.28.0',
+    'websockets>=12.0',
+    'python-dotenv>=1.0.0',
+    'selenium>=4.18.0',
+    'beautifulsoup4>=4.12.0',
+    'zstandard>=0.22.0',
+    'PySide6>=6.6.0',
+    'PySide6-WebEngine>=6.6.0',
+    'psutil>=5.9.0',
+]
+
+[project.optional-dependencies]
+test = [
+    'pytest>=8.0.0',
+    'pytest-asyncio>=0.23.0',
+    'httpx>=0.27.0',
+]
+
+[project.scripts]
+remote-website = 'cli:main'
+
+[tool.setuptools]
+py-modules = ['cli']
+
+[tool.setuptools.packages.find]
+where = ['.']
+include = ['server*', 'worker*', 'controller*', 'shared*', 'website*']
+
+[tool.pytest.ini_options]
+asyncio_mode = 'strict'
+testpaths = ['tests']
