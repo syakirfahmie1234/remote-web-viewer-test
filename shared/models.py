@@ -27,6 +27,9 @@ from shared.protocol import (
     MSG_PONG,
     MSG_THROTTLE_CONFIG,
     MSG_BROWSER_CONFIG,
+    MSG_ALERT_OPENED,
+    MSG_TAB_OPENED,
+    MSG_TAB_CLOSED,
     ALL_DOM_DIFF_OPS,
     ALL_ROLES,
     ALL_WORKER_STATUSES,
@@ -218,6 +221,7 @@ class FullSnapshotMessage(WorkerScopedMessage):
     title: str = ""
     html: str = ""
     compressed: bool = False
+    tab_handle: str = ""
 
     def __post_init__(self) -> None:
         self.type = MSG_FULL_SNAPSHOT
@@ -232,6 +236,8 @@ class DomUpdateMessage(WorkerScopedMessage):
     version: int = 0
     ops: List[DOMDiffOp] = field(default_factory=list)
     compressed: bool = False
+    url: str = ""
+    tab_handle: str = ""
 
     def __post_init__(self) -> None:
         self.type = MSG_DOM_UPDATE
@@ -326,3 +332,30 @@ class BrowserConfigMessage(WorkerScopedMessage):
     def __post_init__(self) -> None:
         self.type = MSG_BROWSER_CONFIG
         super().__post_init__()
+@dataclass
+class AlertOpenedMessage(WorkerScopedMessage):
+    alert_text: str = ""
+
+    def __post_init__(self) -> None:
+        self.type = MSG_ALERT_OPENED
+        super().__post_init__()
+
+
+@dataclass
+class TabOpenedMessage(WorkerScopedMessage):
+    tab_handle: str = ""
+    tab_title: str = ""
+
+    def __post_init__(self) -> None:
+        self.type = MSG_TAB_OPENED
+        super().__post_init__()
+
+
+@dataclass
+class TabClosedMessage(WorkerScopedMessage):
+    tab_handle: str = ""
+
+    def __post_init__(self) -> None:
+        self.type = MSG_TAB_CLOSED
+        super().__post_init__()
+

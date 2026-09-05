@@ -103,7 +103,10 @@ class DOMMutationTracker:
             result = self.browser.execute_script(INJECT_OBSERVER_JS)
             logger.info(f"Injected MutationObserver on '{self.worker_id}' (success={result})")
             return bool(result)
-        except (WebDriverException, JavascriptException) as e:
+        except Exception as e:
+            from selenium.common.exceptions import UnexpectedAlertPresentException
+            if isinstance(e, UnexpectedAlertPresentException):
+                raise
             logger.warning(f"Failed to inject MutationObserver on '{self.worker_id}': {e}")
             return False
 

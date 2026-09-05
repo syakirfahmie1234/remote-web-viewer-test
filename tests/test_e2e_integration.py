@@ -155,12 +155,16 @@ def run_worker_process(server_port, target_domain, worker_id):
     try:
         yield proc
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        import platform
+        if platform.system() == "Windows":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
         
         try:
             with open(stdout_path, "r", encoding="utf-8", errors="replace") as f:

@@ -11,43 +11,43 @@ from selenium.common.exceptions import (
     WebDriverException,
     InvalidSelectorException,
     StaleElementReferenceException,
+    UnexpectedAlertPresentException,
+    NoAlertPresentException,
 )
 
 from shared.models import CommandMessage, CommandResultMessage
 from shared.messages import create_command_result
+from shared.protocol import (
+    CMD_NEW_TAB,
+    CMD_ACCEPT_ALERT,
+    CMD_DISMISS_ALERT,
+    CMD_SEND_ALERT_TEXT,
+    CMD_SWITCH_TAB,
+    CMD_NEW_TAB,
+    CMD_CLOSE_TAB,
+    COMMAND_ALLOWLIST,
+    CMD_NAVIGATE,
+    CMD_CLICK,
+    CMD_TYPE,
+    CMD_CLEAR,
+    CMD_KEYPRESS,
+    CMD_SCROLL,
+    CMD_BACK,
+    CMD_FORWARD,
+    CMD_REFRESH,
+    CMD_SCREENSHOT,
+    CMD_HIGHLIGHT,
+    CMD_PAGE_SOURCE,
+    CMD_ACCEPT_ALERT,
+    CMD_DISMISS_ALERT,
+    CMD_SEND_ALERT_TEXT,
+)
 from worker.browser import BrowserManager
 from worker.config import WORKER_ID, EXPLICIT_WAIT_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-# Allowed commands to prevent arbitrary execution
-COMMAND_ALLOWLIST = {
-    "navigate",
-    "click",
-    "type",
-    "clear",
-    "keypress",
-    "scroll",
-    "highlight",
-    "page_source",
-    "back",
-    "forward",
-    "refresh",
-    "screenshot",
-}
 
-CMD_NAVIGATE = "navigate"
-CMD_CLICK = "click"
-CMD_TYPE = "type"
-CMD_CLEAR = "clear"
-CMD_KEYPRESS = "keypress"
-CMD_SCROLL = "scroll"
-CMD_HIGHLIGHT = "highlight"
-CMD_PAGE_SOURCE = "page_source"
-CMD_BACK = "back"
-CMD_FORWARD = "forward"
-CMD_REFRESH = "refresh"
-CMD_SCREENSHOT = "screenshot"
 
 KEY_MAP = {
     "enter": "\ue007",
@@ -140,7 +140,123 @@ class CommandHandler:
                 success=False,
                 error=err_msg,
             )
+
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
         except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = f"Browser interaction error: {e.msg or str(e)}"
+            logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = f"Browser interaction error: {e.msg or str(e)}"
+            logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
             err_msg = f"Browser interaction error: {e.msg or str(e)}"
             logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
             return create_command_result(
@@ -179,9 +295,12 @@ class CommandHandler:
             selector = payload.get("selector")
             if not selector:
                 raise ValueError("Click command requires 'selector' in payload")
-            self._highlight_element(selector, duration_ms=600)
-            element = self._wait_for_element(selector, condition="clickable")
-            element.click()
+            try:
+                self._highlight_element(selector, duration_ms=600)
+                element = self._wait_for_element(selector, condition="clickable")
+                element.click()
+            except Exception as e:
+                raise ValueError(f"Failed on selector '{selector}': {e}")
             return {"clicked": selector}
 
         elif command == CMD_TYPE:
@@ -192,9 +311,19 @@ class CommandHandler:
                 raise ValueError("Type command requires 'selector' in payload")
             self._highlight_element(selector, duration_ms=400)
             element = self._wait_for_element(selector, condition="visible")
-            if clear_first:
-                element.clear()
-            element.send_keys(text)
+            
+            if element.tag_name == "select":
+                from selenium.webdriver.support.ui import Select
+                select = Select(element)
+                # Try selecting by value first, then visible text
+                try:
+                    select.select_by_value(text)
+                except:
+                    select.select_by_visible_text(text)
+            else:
+                if clear_first:
+                    element.clear()
+                element.send_keys(text)
             return {"typed": text, "selector": selector}
 
         elif command == CMD_CLEAR:
@@ -234,13 +363,20 @@ class CommandHandler:
         elif command == CMD_SCROLL:
             x = int(payload.get("x", 0))
             y = int(payload.get("y", 0))
+            absolute = payload.get("absolute", False)
             selector = payload.get("selector")
 
             if selector:
                 element = self._wait_for_element(selector, condition="present")
-                driver.execute_script("arguments[0].scrollBy(arguments[1], arguments[2]);", element, x, y)
+                if absolute:
+                    driver.execute_script("arguments[0].scrollTo(arguments[1], arguments[2]);", element, x, y)
+                else:
+                    driver.execute_script("arguments[0].scrollBy(arguments[1], arguments[2]);", element, x, y)
             else:
-                driver.execute_script("window.scrollBy(arguments[0], arguments[1]);", x, y)
+                if absolute:
+                    driver.execute_script("window.scrollTo(arguments[0], arguments[1]);", x, y)
+                else:
+                    driver.execute_script("window.scrollBy(arguments[0], arguments[1]);", x, y)
             return {"scrolled_x": x, "scrolled_y": y}
 
         elif command == CMD_BACK:
@@ -259,6 +395,70 @@ class CommandHandler:
             b64_data = self.browser.take_screenshot_base64()
             return {"screenshot_base64": b64_data}
 
+
+        elif command == CMD_ACCEPT_ALERT:
+            try:
+                alert = driver.switch_to.alert
+                alert_text = alert.text
+                alert.accept()
+                return {"alert_accepted": True, "alert_text": alert_text}
+            except NoAlertPresentException:
+                raise ValueError("No alert present to accept")
+
+        elif command == CMD_DISMISS_ALERT:
+            try:
+                alert = driver.switch_to.alert
+                alert_text = alert.text
+                alert.dismiss()
+                return {"alert_dismissed": True, "alert_text": alert_text}
+            except NoAlertPresentException:
+                raise ValueError("No alert present to dismiss")
+
+        elif command == CMD_SEND_ALERT_TEXT:
+            try:
+                alert = driver.switch_to.alert
+                text = payload.get("text", "")
+                alert.send_keys(text)
+                alert.accept()
+                return {"alert_prompt_sent": True, "text_sent": text}
+            except NoAlertPresentException:
+                raise ValueError("No alert present to send text to")
+
+        elif command == CMD_SWITCH_TAB:
+            handle = payload.get("handle")
+            if not handle:
+                raise ValueError("Switch tab command requires 'handle' in payload")
+            self.browser.switch_to_window(handle)
+            return {"switched_to": handle}
+
+        elif command == CMD_NEW_TAB:
+            url = payload.get("url", "chrome://new-tab-page/")
+            self.browser.driver.switch_to.new_window('tab')
+            if url != "chrome://new-tab-page/":
+                self.browser.driver.get(url)
+            return {"new_tab": url}
+
+        elif command == CMD_CLOSE_TAB:
+            handle = payload.get("handle")
+            
+            # Prevent closing the last tab from killing the entire browser session
+            handles = self.browser.get_window_handles()
+            if len(handles) <= 1:
+                # Open a new tab first so the session stays alive
+                self.browser.driver.switch_to.new_window('tab')
+                self.browser.switch_to_window(handles[0])
+                
+            if handle:
+                self.browser.switch_to_window(handle)
+                
+            self.browser.driver.close()
+            
+            # Switch back to remaining valid tab if possible
+            new_handles = self.browser.get_window_handles()
+            if new_handles:
+                self.browser.switch_to_window(new_handles[-1])
+                
+            return {"closed_tab": handle or "active"}
         else:
             raise ValueError(f"Unknown command '{command}'")
 
@@ -338,6 +538,130 @@ class CommandHandler:
 """
             count = driver.execute_script(script, selector, duration_ms, color)
             return int(count or 0)
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = f"Browser interaction error: {e.msg or str(e)}"
+            logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = f"Browser interaction error: {e.msg or str(e)}"
+            logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+            if not alert_text or alert_text == 'Unknown alert text':
+                try:
+                    alert_text = self.browser.driver.switch_to.alert.text
+                except Exception:
+                    pass
+            err_msg = f"ALERT_PRESENT: {alert_text}"
+            logger.warning(f"Command '{command}' blocked by alert on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
+        except WebDriverException as e:
+            import traceback
+            traceback.print_exc()
+            err_msg = f"Browser interaction error: {e.msg or str(e)}"
+            logger.error(f"Command '{command}' webdriver error on '{self.worker_id}': {err_msg}")
+            return create_command_result(
+                worker_id=self.worker_id,
+                command=command,
+                success=False,
+                error=err_msg,
+            )
         except Exception as e:
             logger.debug(f"_highlight_element silently ignored error: {e}")
             return 0

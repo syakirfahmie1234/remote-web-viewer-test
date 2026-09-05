@@ -93,6 +93,8 @@ class Worker:
         self._command_executing = False
         
         self._last_snapshot_html: str = ""
+        self._last_snapshot_url: str = ""
+        self._known_window_handles: set[str] = set()
         self._navigation_in_progress: bool = False
         self._mutation_task: Optional[asyncio.Task] = None
 
@@ -113,10 +115,11 @@ class Worker:
 
         # 1. Start persistent Chrome browser
         self.browser.start()
-        try:
-            self.browser.navigate(self.target_domain)
-        except Exception as e:
-            logger.warning(f"Initial navigation to target domain failed or delayed: {e}")
+        if self.target_domain:
+            try:
+                self.browser.navigate(self.target_domain)
+            except Exception as e:
+                logger.warning(f"Initial navigation to target domain failed or delayed: {e}")
 
         # 2. Connect to WebSocket relay server
         await self.ws_client.start()
@@ -173,6 +176,7 @@ class Worker:
             page_source = await asyncio.to_thread(self.browser.get_page_source)
             url = await asyncio.to_thread(self.browser.get_current_url)
             title = await asyncio.to_thread(self.browser.get_title)
+            tab_handle = await asyncio.to_thread(self.browser.get_current_window_handle)
             await asyncio.to_thread(self.dom_tracker.inject)
             
         # Normalization and compression can be done without Selenium lock, just offload to thread
@@ -193,12 +197,13 @@ class Worker:
                 title=title,
                 html=payload_html,
                 compressed=is_compressed,
+                tab_handle=tab_handle,
             )
             await self.ws_client.send_message(msg)
             logger.info(f"Sent FULL_SNAPSHOT (version={self.dom_version}, url={url}, compressed={is_compressed})")
             
             self._last_snapshot_html = normalized_html
-            self.dom_version += 1
+            self._last_snapshot_url = url
 
     async def _recover_from_browser_crash(self) -> None:
         """
@@ -219,10 +224,11 @@ class Worker:
 
         async with self._selenium_lock:
             await asyncio.to_thread(self.browser.restart)
-            try:
-                await asyncio.to_thread(self.browser.navigate, self.target_domain)
-            except Exception as e:
-                logger.error(f"Navigation after crash restart failed: {e}")
+            if self.target_domain:
+                try:
+                    await asyncio.to_thread(self.browser.navigate, self.target_domain)
+                except Exception as e:
+                    logger.error(f"Navigation after crash restart failed: {e}")
 
         async with self._state_lock:
             self.dom_version = 0
@@ -240,7 +246,7 @@ class Worker:
         elif isinstance(msg, CommandMessage):
             async def _process_command():
                 logger.info(f"Executing command '{msg.command}' for worker '{self.worker_id}'")
-                is_nav = (msg.command == "navigate")
+                is_nav = msg.command in ("navigate", "back", "forward", "refresh", "switch_tab", "close_tab", "new_tab")
                 if is_nav:
                     self._navigation_in_progress = True
                     
@@ -253,6 +259,18 @@ class Worker:
                     
                 await self.ws_client.send_message(result)
                 
+                if not result.success and result.error and result.error.startswith("ALERT_PRESENT"):
+                    from shared.messages import create_alert_opened, create_worker_status
+                    from shared.protocol import STATUS_ALERT_BLOCKING
+                    alert_text = result.error.replace("ALERT_PRESENT: ", "")
+                    await self.ws_client.send_message(create_alert_opened(self.worker_id, alert_text))
+                    await self.ws_client.send_message(create_worker_status(self.worker_id, STATUS_ALERT_BLOCKING))
+                
+                from shared.protocol import CMD_ACCEPT_ALERT, CMD_DISMISS_ALERT, CMD_SEND_ALERT_TEXT
+                if result.success and msg.command in (CMD_ACCEPT_ALERT, CMD_DISMISS_ALERT, CMD_SEND_ALERT_TEXT):
+                    is_nav = True
+                    self._navigation_in_progress = True
+
                 if is_nav:
                     async with self._selenium_lock:
                         if self.browser.is_alive():
@@ -266,6 +284,7 @@ class Worker:
                         async with self._state_lock:
                             self._last_snapshot_html = normalized_html
                     self._navigation_in_progress = False
+                    await self.send_full_snapshot()
 
             asyncio.create_task(_process_command())
             
@@ -302,10 +321,11 @@ class Worker:
 
             async with self._selenium_lock:
                 await asyncio.to_thread(self.browser.restart_with_config, new_config)
-                try:
-                    await asyncio.to_thread(self.browser.navigate, self.target_domain)
-                except Exception as e:
-                    logger.error(f"Navigation after config restart failed: {e}")
+                if self.target_domain:
+                    try:
+                        await asyncio.to_thread(self.browser.navigate, self.target_domain)
+                    except Exception as e:
+                        logger.error(f"Navigation after config restart failed: {e}")
                 
             async with self._state_lock:
                 self.dom_version = 0
@@ -320,7 +340,7 @@ class Worker:
         while self._running:
             try:
                 if getattr(self, "_command_executing", False):
-                    await asyncio.sleep(0.5)  # Backoff during active commands
+                    await asyncio.sleep(0.8)  # Backoff during active commands (longer than 600ms highlight)
                     continue
                 else:
                     await asyncio.sleep(0.1)
@@ -335,15 +355,69 @@ class Worker:
                     continue
                 
                 async with self._selenium_lock:
+                    is_injected_before = await asyncio.to_thread(self.dom_tracker.is_injected)
                     mutations = await asyncio.to_thread(self.dom_tracker.drain_mutations)
-                    if not mutations:
-                        continue
+                    current_url = await asyncio.to_thread(self.browser.get_current_url)
+                    current_handle = await asyncio.to_thread(self.browser.get_current_window_handle)
                     
                     if self._navigation_in_progress or not self.browser.is_alive():
                         continue
                         
                     page_source = await asyncio.to_thread(self.browser.get_page_source)
                 
+                if current_url and self._last_snapshot_url and current_url != self._last_snapshot_url:
+                    logger.info(f"Asynchronous URL change detected on '{self.worker_id}': {self._last_snapshot_url} -> {current_url}")
+                    self._last_snapshot_url = current_url
+                    if is_injected_before:
+                        # SPA navigation! Just send an empty DomUpdateMessage with the URL
+                        msg = create_dom_update(
+                            worker_id=self.worker_id,
+                            base_version=self.dom_version,
+                            version=self.dom_version,  # version doesn't change since ops is empty
+                            ops=[],
+                            url=current_url,
+                            tab_handle=current_handle
+                        )
+                        await self.ws_client.send_message(msg)
+                        # Do not 'continue' - process any mutations that came with this SPA navigation!
+                    else:
+                        await self.send_full_snapshot()
+                        continue
+
+                # Check for new tabs and closed tabs
+                all_handles = await asyncio.to_thread(self.browser.get_window_handles)
+                if all_handles:
+                    current_handles_set = set(all_handles)
+                    new_handles = current_handles_set - self._known_window_handles
+                    closed_handles = self._known_window_handles - current_handles_set
+                    
+                    from shared.messages import create_tab_opened, create_tab_closed
+                    
+                    for closed_h in closed_handles:
+                        await self.ws_client.send_message(create_tab_closed(self.worker_id, closed_h))
+                        
+                    if self._known_window_handles and new_handles:
+                        newest_handle = all_handles[-1]
+                        logger.info(f"New tab detected on '{self.worker_id}', following handle {newest_handle}")
+                        await asyncio.to_thread(self.browser.switch_to_window, newest_handle)
+                        self._known_window_handles = current_handles_set
+                        
+                        new_title = await asyncio.to_thread(self.browser.get_title)
+                        await self.ws_client.send_message(create_tab_opened(self.worker_id, newest_handle, new_title))
+                        
+                        self._last_snapshot_url = await asyncio.to_thread(self.browser.get_current_url)
+                        await self.send_full_snapshot()
+                        continue
+                    else:
+                        for new_h in new_handles:
+                            # If it's the very first handle on startup
+                            new_title = await asyncio.to_thread(self.browser.get_title)
+                            await self.ws_client.send_message(create_tab_opened(self.worker_id, new_h, new_title))
+                        self._known_window_handles = current_handles_set
+
+                if not mutations:
+                    continue
+
                 # Normalization and diffing do not need Selenium lock
                 new_html = await asyncio.to_thread(self.normalizer.normalize, page_source)
                 
@@ -354,7 +428,8 @@ class Worker:
                             worker_id=self.worker_id,
                             base_version=self.dom_version,
                             version=self.dom_version + 1,
-                            ops=[op.to_dict() for op in diff_ops]
+                            ops=[op.to_dict() for op in diff_ops],
+                            tab_handle=current_handle
                         )
                         await self.ws_client.send_message(msg)
                         
@@ -363,12 +438,30 @@ class Worker:
                         logger.info(f"Sent DOM_UPDATE for '{self.worker_id}' (version={self.dom_version}, ops={len(diff_ops)})")
                     else:
                         logger.debug(f"Drained mutations but computed diff is empty for '{self.worker_id}'")
-            except WebDriverException:
-                pass
-            except asyncio.CancelledError:
-                break
             except Exception as e:
-                logger.error(f"Error in mutation poll loop: {e}")
+                from selenium.common.exceptions import UnexpectedAlertPresentException
+                if isinstance(e, UnexpectedAlertPresentException):
+                    alert_text = getattr(e, 'alert_text', 'Unknown alert text')
+                    if not alert_text or alert_text == 'Unknown alert text':
+                        try:
+                            alert_text = self.browser.driver.switch_to.alert.text
+                        except Exception:
+                            pass
+                    logger.warning(f"Mutation loop blocked by alert on '{self.worker_id}': {alert_text}")
+                    from shared.messages import create_alert_opened, create_worker_status
+                    from shared.protocol import STATUS_ALERT_BLOCKING
+                    await self.ws_client.send_message(create_alert_opened(self.worker_id, alert_text))
+                    await self.ws_client.send_message(create_worker_status(self.worker_id, STATUS_ALERT_BLOCKING))
+                    await asyncio.sleep(1)
+                    continue
+                
+                from selenium.common.exceptions import WebDriverException
+                if isinstance(e, WebDriverException):
+                    pass
+                elif isinstance(e, asyncio.CancelledError):
+                    break
+                else:
+                    logger.error(f"Error in mutation poll loop: {e}")
 
 async def run_worker() -> None:
     """Entry point coroutine for running worker process."""

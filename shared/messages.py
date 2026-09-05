@@ -29,6 +29,9 @@ from shared.protocol import (
     MSG_PONG,
     MSG_THROTTLE_CONFIG,
     MSG_BROWSER_CONFIG,
+    MSG_TAB_OPENED,
+    MSG_TAB_CLOSED,
+    MSG_ALERT_OPENED,
 )
 from shared.models import (
     BaseMessage,
@@ -49,6 +52,9 @@ from shared.models import (
     ThrottleConfigMessage,
     BrowserConfigMessage,
     DOMDiffOp,
+    AlertOpenedMessage,
+    TabOpenedMessage,
+    TabClosedMessage,
     generate_message_id,
     get_current_utc_iso,
 )
@@ -220,6 +226,7 @@ def create_full_snapshot(
     title: str,
     html: str,
     compressed: bool = False,
+    tab_handle: str = "",
 ) -> FullSnapshotMessage:
     """Create a FULL_SNAPSHOT message with mandatory worker_id."""
     if not worker_id or not isinstance(worker_id, str) or not worker_id.strip():
@@ -232,6 +239,7 @@ def create_full_snapshot(
         title=title,
         html=html,
         compressed=compressed,
+        tab_handle=tab_handle,
         message_id=generate_message_id(),
         timestamp=get_current_utc_iso(),
         protocol_version=PROTOCOL_VERSION,
@@ -244,6 +252,8 @@ def create_dom_update(
     version: int,
     ops: List[Union[DOMDiffOp, Dict[str, Any]]],
     compressed: bool = False,
+    url: str = "",
+    tab_handle: str = "",
 ) -> DomUpdateMessage:
     """Create a DOM_UPDATE message with mandatory worker_id and structured ops."""
     if not worker_id or not isinstance(worker_id, str) or not worker_id.strip():
@@ -259,6 +269,7 @@ def create_dom_update(
         version=version,
         ops=normalized_ops,
         compressed=compressed,
+        tab_handle=tab_handle,
         message_id=generate_message_id(),
         timestamp=get_current_utc_iso(),
         protocol_version=PROTOCOL_VERSION,
@@ -489,6 +500,7 @@ def parse_message(raw: Union[str, bytes, Dict[str, Any]]) -> BaseMessage:
                 title=str(data.get("title", "")),
                 html=str(data.get("html", "")),
                 compressed=bool(data.get("compressed", False)),
+                tab_handle=str(data.get("tab_handle", "")),
                 message_id=msg_id,
                 timestamp=timestamp,
                 protocol_version=protocol_ver,
@@ -506,6 +518,7 @@ def parse_message(raw: Union[str, bytes, Dict[str, Any]]) -> BaseMessage:
                 version=int(data.get("version", 0)),
                 ops=ops,
                 compressed=bool(data.get("compressed", False)),
+                tab_handle=str(data.get("tab_handle", "")),
                 message_id=msg_id,
                 timestamp=timestamp,
                 protocol_version=protocol_ver,
@@ -568,6 +581,26 @@ def parse_message(raw: Union[str, bytes, Dict[str, Any]]) -> BaseMessage:
                 timestamp=timestamp,
                 protocol_version=protocol_ver,
             )
+
+        elif msg_type == MSG_TAB_OPENED:
+            return TabOpenedMessage(
+                type=MSG_TAB_OPENED,
+                worker_id=worker_id,
+                tab_handle=str(data.get("tab_handle", "")),
+                tab_title=str(data.get("tab_title", "")),
+                message_id=msg_id,
+                timestamp=timestamp,
+                protocol_version=protocol_ver,
+            )
+        elif msg_type == MSG_TAB_CLOSED:
+            return TabClosedMessage(
+                type=MSG_TAB_CLOSED,
+                worker_id=worker_id,
+                tab_handle=str(data.get("tab_handle", "")),
+                message_id=msg_id,
+                timestamp=timestamp,
+                protocol_version=protocol_ver,
+            )
         else:
             raise UnknownMessageTypeError(msg_type)
     except (TypeError, ValueError) as exc:
@@ -601,3 +634,35 @@ class MessageDeduplicator:
     def clear(self) -> None:
         """Clear the deduplicator store."""
         self._seen.clear()
+
+
+def create_tab_opened(worker_id: str, tab_handle: str, tab_title: str = "") -> TabOpenedMessage:
+    return TabOpenedMessage(
+        type=MSG_TAB_OPENED,
+        worker_id=worker_id,
+        tab_handle=tab_handle,
+        tab_title=tab_title,
+        message_id=generate_message_id(),
+        timestamp=get_current_utc_iso(),
+        protocol_version=PROTOCOL_VERSION,
+    )
+
+def create_tab_closed(worker_id: str, tab_handle: str) -> TabClosedMessage:
+    return TabClosedMessage(
+        type=MSG_TAB_CLOSED,
+        worker_id=worker_id,
+        tab_handle=tab_handle,
+        message_id=generate_message_id(),
+        timestamp=get_current_utc_iso(),
+        protocol_version=PROTOCOL_VERSION,
+    )
+
+def create_alert_opened(worker_id: str, alert_text: str) -> AlertOpenedMessage:
+    return AlertOpenedMessage(
+        type=MSG_ALERT_OPENED,
+        worker_id=worker_id,
+        alert_text=alert_text,
+        message_id=generate_message_id(),
+        timestamp=get_current_utc_iso(),
+        protocol_version=PROTOCOL_VERSION,
+    )

@@ -16,12 +16,13 @@ from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QVBoxLayout,
-    QSplitter,
     QListWidget,
     QListWidgetItem,
     QGroupBox,
     QMessageBox,
     QTabWidget,
+    QPushButton,
+    QSizePolicy,
 )
 
 from controller.state_manager import ControllerStateManager
@@ -99,12 +100,12 @@ class MainWindow(QMainWindow):
 
         root_layout = QHBoxLayout(central_widget)
         root_layout.setContentsMargins(8, 8, 8, 8)
-
-        splitter = QSplitter(Qt.Horizontal)
+        root_layout.setSpacing(0)
 
         # 1. Left Sidebar: Worker List
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
+        self._left_panel = QWidget()
+        self._left_panel.setFixedWidth(200)
+        left_layout = QVBoxLayout(self._left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         workers_box = QGroupBox("Connected Workers")
@@ -116,8 +117,20 @@ class MainWindow(QMainWindow):
         )
         wb_layout.addWidget(self.worker_list)
         left_layout.addWidget(workers_box)
-        left_panel.setMaximumWidth(260)
-        splitter.addWidget(left_panel)
+        root_layout.addWidget(self._left_panel)
+
+        # 1.5. Sidebar Toggle Strip
+        self._toggle_btn = QPushButton("◀")
+        self._toggle_btn.setToolTip("Collapse worker list")
+        self._toggle_btn.setFixedWidth(16)
+        self._toggle_btn.setStyleSheet(
+            "QPushButton { background: #e1e4e8; border: none; border-right: 1px solid #d1d5da; color: #24292e; border-radius: 0px; }"
+            "QPushButton:hover { background: #d1d5da; }"
+        )
+        self._toggle_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self._sidebar_expanded = True
+        self._toggle_btn.clicked.connect(self._toggle_sidebar)
+        root_layout.addWidget(self._toggle_btn)
 
         # 2. Right Main Area: Tabs for Workers
         self.tabs = QTabWidget()
@@ -125,11 +138,18 @@ class MainWindow(QMainWindow):
         self.tabs.tabCloseRequested.connect(self._on_tab_close_requested)
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        splitter.addWidget(self.tabs)
-        splitter.setStretchFactor(1, 4)
-        root_layout.addWidget(splitter)
+        root_layout.addWidget(self.tabs, stretch=1)
 
         self.worker_tabs: Dict[str, WorkerTab] = {}
+
+    def _toggle_sidebar(self) -> None:
+        if self._sidebar_expanded:
+            self._left_panel.setFixedWidth(0)
+            self._toggle_btn.setText("▶")
+        else:
+            self._left_panel.setFixedWidth(200)
+            self._toggle_btn.setText("◀")
+        self._sidebar_expanded = not self._sidebar_expanded
 
     @property
     def browser_view(self) -> Optional[BrowserView]:
@@ -211,12 +231,62 @@ class MainWindow(QMainWindow):
                 tab.stats_panel.append_log(f"Worker '{msg.worker_id}' status: {msg.status}", "STATUS")
             self._refresh_worker_list_ui()
 
+        elif type(msg).__name__ == "TabOpenedMessage":
+            self.state_mgr.apply_tab_opened(msg)
+            if tab:
+                tab.add_browser_tab(msg.tab_handle, msg.tab_title)
+                tab.set_active_browser_tab(msg.tab_handle)
+                tab.stats_panel.append_log(f"Tab Opened: {msg.tab_handle} ({msg.tab_title})", "INFO")
+
+        elif type(msg).__name__ == "TabClosedMessage":
+            self.state_mgr.apply_tab_closed(msg)
+            if tab:
+                tab.remove_browser_tab(msg.tab_handle)
+                tab.stats_panel.append_log(f"Tab Closed: {msg.tab_handle}", "INFO")
+                self._update_tab_view_from_state(msg.worker_id)
+
+        elif type(msg).__name__ == "AlertOpenedMessage":
+            slot = self.state_mgr.get_or_create_slot(msg.worker_id)
+            slot.alert_text = msg.alert_text
+            self.state_mgr.update_status(msg.worker_id, "alert_blocking", None)
+            if tab:
+                tab.stats_panel.append_log(f"ALERT DETECTED on '{msg.worker_id}': {msg.alert_text}", "ALERT")
+                self._update_tab_view_from_state(msg.worker_id)
+            self._refresh_worker_list_ui()
+
+        elif type(msg).__name__ == "TabOpenedMessage":
+            self.state_mgr.apply_tab_opened(msg)
+            if tab:
+                tab.add_browser_tab(msg.tab_handle, msg.tab_title)
+                tab.set_active_browser_tab(msg.tab_handle)
+                tab.stats_panel.append_log(f"Tab Opened: {msg.tab_handle} ({msg.tab_title})", "INFO")
+
+        elif type(msg).__name__ == "TabClosedMessage":
+            self.state_mgr.apply_tab_closed(msg)
+            if tab:
+                tab.remove_browser_tab(msg.tab_handle)
+                tab.stats_panel.append_log(f"Tab Closed: {msg.tab_handle}", "INFO")
+                self._update_tab_view_from_state(msg.worker_id)
+
+        elif type(msg).__name__ == "AlertOpenedMessage":
+            slot = self.state_mgr.get_or_create_slot(msg.worker_id)
+            slot.alert_text = msg.alert_text
+            self.state_mgr.update_status(msg.worker_id, "alert_blocking", None)
+            if tab:
+                tab.stats_panel.append_log(f"ALERT DETECTED on '{msg.worker_id}': {msg.alert_text}", "ALERT")
+                self._update_tab_view_from_state(msg.worker_id)
+            self._refresh_worker_list_ui()
+
         elif type(msg).__name__ == "FullSnapshotMessage":
             byte_size = len(msg.html)  # Rough payload size estimate
             self.state_mgr.record_bytes_received(msg.worker_id, byte_size)
             self.state_mgr.apply_full_snapshot(msg)
             self.worker_mgr.update_worker_status(msg.worker_id, "connected", msg.version)
+            self.state_mgr.update_status(msg.worker_id, "connected", msg.version)
             if tab:
+                if msg.tab_handle:
+                    tab.add_browser_tab(msg.tab_handle, msg.title)
+                    tab.set_active_browser_tab(msg.tab_handle)
                 tab.stats_panel.append_log(f"FULL_SNAPSHOT received from '{msg.worker_id}' (v0{msg.version})", "SNAPSHOT")
                 tab.stats_panel.update_metrics(self.state_mgr.get_slot(msg.worker_id))
                 self._update_tab_view_from_state(msg.worker_id)
@@ -243,6 +313,8 @@ class MainWindow(QMainWindow):
         elif type(msg).__name__ == "CommandResultMessage":
             self.command_queue.handle_command_result(msg)
             self.state_mgr.record_command_result(msg)
+            if msg.success and msg.command == "switch_tab":
+                self._update_tab_view_from_state(msg.worker_id)
             status_text = "SUCCESS" if msg.success else f"FAILED: {msg.error}"
             if tab:
                 tab.stats_panel.append_log(f"Command '{msg.command}' on '{msg.worker_id}': {status_text}", "RESULT")
@@ -288,6 +360,8 @@ class MainWindow(QMainWindow):
         else:
             self.tabs.setCurrentWidget(self.worker_tabs[new_worker_id])
             
+        tab = self.worker_tabs.get(new_worker_id)
+
         self._update_tab_view_from_state(new_worker_id)
         self._on_queue_updated(new_worker_id)
 
@@ -298,15 +372,26 @@ class MainWindow(QMainWindow):
 
         slot = self.state_mgr.get_slot(worker_id)
         if slot:
-            tab.browser_view.update_view(
-                url=slot.url,
-                title=slot.title,
-                raw_html=slot.html,
-                dom_version=slot.dom_version,
-                is_stale=slot.is_stale,
-                worker_status=slot.status,
-            )
-            tab.command_panel.set_url(slot.url)
+            active_tab = slot.active_tab
+            if active_tab:
+                tab.browser_view.update_view(
+                    url=active_tab.url,
+                    title=active_tab.title,
+                    raw_html=active_tab.html,
+                    dom_version=active_tab.dom_version,
+                    is_stale=active_tab.is_stale,
+                    worker_status=slot.status,
+                    tab_handle=slot.active_tab_handle,
+                )
+                tab.set_active_browser_tab(slot.active_tab_handle)
+            else:
+                tab.browser_view.update_view("", "", "", 0, True, slot.status)
+                
+            if slot.status == "alert_blocking" and slot.alert_text is not None:
+                tab.browser_view.show_alert(slot.alert_text)
+            else:
+                tab.browser_view.hide_alert()
+            tab.browser_view.set_url(slot.url)
 
     @Slot(str)
     def _on_queue_updated(self, worker_id: str) -> None:
@@ -325,6 +410,18 @@ class MainWindow(QMainWindow):
         tab = WorkerTab(worker_id)
         tab.command_panel.command_requested.connect(
             lambda cmd, pl, w_id=worker_id: self._on_command_requested_tab(w_id, cmd, pl)
+        )
+        tab.browser_view.command_requested.connect(
+            lambda cmd, pl, w_id=worker_id: self._on_command_requested_tab(w_id, cmd, pl)
+        )
+        tab.browser_view.resync_requested.connect(
+            lambda w_id=worker_id: self._on_resync_requested_tab(w_id)
+        )
+        tab.browser_view.navigate_requested.connect(
+            lambda url, w_id=worker_id: self._on_command_requested_tab(w_id, "navigate", {"url": url})
+        )
+        tab.browser_view.new_tab_requested.connect(
+            lambda url, w_id=worker_id: self._on_command_requested_tab(w_id, "new_tab", {"url": url})
         )
         tab.command_panel.resync_requested.connect(
             lambda w_id=worker_id: self._on_resync_requested_tab(w_id)

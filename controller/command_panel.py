@@ -32,14 +32,9 @@ from controller.command_queue import (
     STATE_TIMED_OUT,
 )
 from shared.protocol import (
-    CMD_NAVIGATE,
     CMD_CLICK,
     CMD_TYPE,
     CMD_CLEAR,
-    CMD_BACK,
-    CMD_FORWARD,
-    CMD_REFRESH,
-    CMD_SCREENSHOT,
     CMD_HIGHLIGHT,
 )
 
@@ -76,27 +71,6 @@ class CommandPanel(QWidget):
         eb_layout.addWidget(self.btn_dismiss_error)
         self.error_banner.hide()
         main_layout.addWidget(self.error_banner)
-
-        # 2. Navigation Bar
-        nav_layout = QHBoxLayout()
-        self.btn_back = QPushButton("◀ Back")
-        self.btn_forward = QPushButton("Forward ▶")
-        self.btn_refresh = QPushButton("⟳ Refresh")
-        self.btn_resync = QPushButton("⚡ Resync")
-        self.btn_screenshot = QPushButton("📷 Screenshot")
-
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://example.com/...")
-        self.btn_navigate = QPushButton("Go")
-
-        nav_layout.addWidget(self.btn_back)
-        nav_layout.addWidget(self.btn_forward)
-        nav_layout.addWidget(self.btn_refresh)
-        nav_layout.addWidget(self.btn_resync)
-        nav_layout.addWidget(self.btn_screenshot)
-        nav_layout.addWidget(self.url_input, stretch=1)
-        nav_layout.addWidget(self.btn_navigate)
-        main_layout.addLayout(nav_layout)
 
         # 3. Element Interaction & Queue Split
         interaction_layout = QHBoxLayout()
@@ -184,13 +158,6 @@ class CommandPanel(QWidget):
         main_layout.addLayout(interaction_layout)
 
         # Connect button signals
-        self.btn_navigate.clicked.connect(self._on_navigate_clicked)
-        self.url_input.returnPressed.connect(self._on_navigate_clicked)
-        self.btn_back.clicked.connect(lambda: self.command_requested.emit(CMD_BACK, {}))
-        self.btn_forward.clicked.connect(lambda: self.command_requested.emit(CMD_FORWARD, {}))
-        self.btn_refresh.clicked.connect(lambda: self.command_requested.emit(CMD_REFRESH, {}))
-        self.btn_screenshot.clicked.connect(lambda: self.command_requested.emit(CMD_SCREENSHOT, {}))
-        self.btn_resync.clicked.connect(lambda: self.resync_requested.emit())
 
         self.btn_click.clicked.connect(self._on_click_clicked)
         self.btn_type.clicked.connect(self._on_type_clicked)
@@ -199,9 +166,6 @@ class CommandPanel(QWidget):
         self.profile_combo.currentTextChanged.connect(self.throttle_profile_changed.emit)
         self.btn_apply_config.clicked.connect(self._on_apply_config_clicked)
 
-    def set_url(self, url: str) -> None:
-        """Update URL field in navigation bar."""
-        self.url_input.setText(url)
 
     def show_failure(self, item: CommandItem) -> None:
         """Surface a command failure prominently in the GUI."""
@@ -243,10 +207,6 @@ class CommandPanel(QWidget):
             dur_str = f"{item.duration_ms:.0f}ms" if item.duration_ms is not None else "-"
             self.queue_table.setItem(row, 3, QTableWidgetItem(dur_str))
 
-    def _on_navigate_clicked(self) -> None:
-        url = self.url_input.text().strip()
-        if url:
-            self.command_requested.emit(CMD_NAVIGATE, {"url": url})
 
     def _on_click_clicked(self) -> None:
         selector = self.selector_input.text().strip()

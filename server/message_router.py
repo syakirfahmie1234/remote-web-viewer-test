@@ -37,6 +37,9 @@ from shared.models import (
     DomUpdateMessage,
     ResyncRequestMessage,
     WorkerStatusMessage,
+    AlertOpenedMessage,
+    TabOpenedMessage,
+    TabClosedMessage,
     ErrorMessage,
     PingMessage,
     PongMessage,
@@ -270,7 +273,12 @@ class MessageRouter:
                 logger.error(f"Failed to forward browser config to worker {worker_id}: {e}")
             return
 
-        # 6. PING / PONG
+        # 6. ALERT_OPENED
+        elif isinstance(msg, AlertOpenedMessage):
+            await self._broadcast_to_subscribers(bound_worker_id, msg)
+            return
+
+        # 7. PING / PONG
         elif isinstance(msg, PingMessage):
             await ws.send_text(serialize_message(create_pong(payload=msg.payload)))
             return
@@ -338,17 +346,12 @@ class MessageRouter:
             await self._broadcast_to_subscribers(bound_worker_id, msg)
             return
 
-        # 4. COMMAND_RESULT
-        elif isinstance(msg, CommandResultMessage):
+        # 4. COMMAND_RESULT, ERROR, ALERT_OPENED, TAB_OPENED, TAB_CLOSED
+        elif isinstance(msg, (CommandResultMessage, ErrorMessage, AlertOpenedMessage, TabOpenedMessage, TabClosedMessage)):
             await self._broadcast_to_subscribers(bound_worker_id, msg)
             return
 
-        # 5. ERROR
-        elif isinstance(msg, ErrorMessage):
-            await self._broadcast_to_subscribers(bound_worker_id, msg)
-            return
-
-        # 6. PING / PONG
+        # 7. PING / PONG
         elif isinstance(msg, PingMessage):
             await ws.send_text(serialize_message(create_pong(payload=msg.payload)))
             return

@@ -70,6 +70,8 @@ class BrowserManager:
         logger.info(f"Starting Chrome browser (headless={conf.headless}, profile={self.user_data_dir}, {proxy_log}, {auth_log})...")
         
         options = Options()
+        options.unhandled_prompt_behavior = "ignore"
+        options.unhandled_prompt_behavior = "ignore"
 
         if conf.headless:
             options.add_argument("--headless=new")
@@ -213,6 +215,30 @@ class BrowserManager:
         Does NOT unnecessarily encode/decode.
         """
         self._ensure_alive()
+        # Freeze dynamic properties into HTML attributes so page_source captures them
+        try:
+            self.driver.execute_script('''
+                var elems = document.querySelectorAll('input, textarea, select');
+                for (var i = 0; i < elems.length; i++) {
+                    var el = elems[i];
+                    if (el.type === 'checkbox' || el.type === 'radio') {
+                        if (el.checked) el.setAttribute('checked', 'checked');
+                        else el.removeAttribute('checked');
+                    } else if (el.tagName === 'TEXTAREA') {
+                        el.textContent = el.value;
+                    } else if (el.value !== undefined) {
+                        el.setAttribute('value', el.value);
+                    }
+                    if (el.tagName === 'SELECT') {
+                        for (var j = 0; j < el.options.length; j++) {
+                            if (el.options[j].selected) el.options[j].setAttribute('selected', 'selected');
+                            else el.options[j].removeAttribute('selected');
+                        }
+                    }
+                }
+            ''')
+        except Exception:
+            pass
         return self.driver.page_source
 
     def get_current_url(self) -> str:
@@ -223,6 +249,33 @@ class BrowserManager:
             return self.driver.current_url
         except Exception:
             return ""
+
+
+    def get_current_window_handle(self) -> str:
+        if not self.is_alive():
+            return ""
+        try:
+            return self.driver.current_window_handle
+        except Exception:
+            return ""
+
+    def get_window_handles(self) -> list[str]:
+        """Return list of all open window handles."""
+        if not self.driver:
+            return []
+        try:
+            return self.driver.window_handles
+        except Exception:
+            return []
+
+    def switch_to_window(self, handle: str) -> None:
+        """Switch Selenium focus to the given window handle."""
+        if self.driver:
+            try:
+                self.driver.switch_to.window(handle)
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to switch to window {handle}: {e}")
 
     def get_title(self) -> str:
         """Get the current page title."""

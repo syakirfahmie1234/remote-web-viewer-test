@@ -25,6 +25,9 @@ MSG_PING: Final[str] = "ping"
 MSG_PONG: Final[str] = "pong"
 MSG_THROTTLE_CONFIG: Final[str] = "throttle_config"
 MSG_BROWSER_CONFIG: Final[str] = "browser_config"
+MSG_ALERT_OPENED: Final[str] = "alert_opened"
+MSG_TAB_OPENED: Final[str] = "tab_opened"
+MSG_TAB_CLOSED: Final[str] = "tab_closed"
 
 # Set of all valid message types
 ALL_MESSAGE_TYPES: Final[FrozenSet[str]] = frozenset({
@@ -43,6 +46,9 @@ ALL_MESSAGE_TYPES: Final[FrozenSet[str]] = frozenset({
     MSG_PONG,
     MSG_THROTTLE_CONFIG,
     MSG_BROWSER_CONFIG,
+    MSG_ALERT_OPENED,
+    MSG_TAB_OPENED,
+    MSG_TAB_CLOSED,
 })
 
 # Worker-scoped message types where worker_id is strictly MANDATORY
@@ -56,6 +62,9 @@ WORKER_SCOPED_TYPES: Final[FrozenSet[str]] = frozenset({
     MSG_RESYNC_REQUEST,
     MSG_THROTTLE_CONFIG,
     MSG_BROWSER_CONFIG,
+    MSG_ALERT_OPENED,
+    MSG_TAB_OPENED,
+    MSG_TAB_CLOSED,
 })
 
 # Connection-level message types where worker_id is not required
@@ -78,12 +87,15 @@ STATUS_DISCONNECTED: Final[str] = "disconnected"
 STATUS_CRASHED: Final[str] = "crashed"
 STATUS_IDLE: Final[str] = "idle"
 STATUS_BUSY: Final[str] = "busy"
+STATUS_ALERT_BLOCKING: Final[str] = "alert_blocking"
+
 ALL_WORKER_STATUSES: Final[FrozenSet[str]] = frozenset({
     STATUS_CONNECTED,
     STATUS_DISCONNECTED,
     STATUS_CRASHED,
     STATUS_IDLE,
     STATUS_BUSY,
+    STATUS_ALERT_BLOCKING,
 })
 
 # Command allowlist - strictly enforced at server routing and worker execution layers
@@ -99,6 +111,13 @@ CMD_REFRESH: Final[str] = "refresh"
 CMD_SCREENSHOT: Final[str] = "screenshot"
 CMD_HIGHLIGHT: Final[str] = "highlight"
 CMD_PAGE_SOURCE: Final[str] = "page_source"
+CMD_SELECT: Final[str] = "select"
+CMD_ACCEPT_ALERT: Final[str] = "accept_alert"
+CMD_DISMISS_ALERT: Final[str] = "dismiss_alert"
+CMD_SEND_ALERT_TEXT: Final[str] = "send_alert_text"
+CMD_SWITCH_TAB: Final[str] = "switch_tab"
+CMD_NEW_TAB: Final[str] = "new_tab"
+CMD_CLOSE_TAB: Final[str] = "close_tab"
 
 COMMAND_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     CMD_NAVIGATE,
@@ -113,6 +132,13 @@ COMMAND_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     CMD_SCREENSHOT,
     CMD_HIGHLIGHT,
     CMD_PAGE_SOURCE,
+    CMD_SELECT,
+    CMD_ACCEPT_ALERT,
+    CMD_DISMISS_ALERT,
+    CMD_SEND_ALERT_TEXT,
+    CMD_SWITCH_TAB,
+    CMD_NEW_TAB,
+    CMD_CLOSE_TAB,
 })
 
 # Forbidden commands - explicitly rejected to prevent arbitrary execution
