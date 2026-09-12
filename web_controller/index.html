@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Controller</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- fzstd for client-side zstandard decompression -->
+    <script src="https://unpkg.com/fzstd"></script>
+</head>
+<body>
+
+    <!-- LOGIN SCREEN -->
+    <div id="login-screen">
+        <div class="login-box">
+            <h2>Remote Controller</h2>
+            <p>Enter your access token to connect.</p>
+            <input type="password" id="token-input" placeholder="Token (e.g. test-controller-456)">
+            <button id="btn-login">Login</button>
+            <div id="login-error" class="hidden">Invalid token or connection failed.</div>
+        </div>
+    </div>
+
+    <!-- MAIN UI (Hidden until authenticated) -->
+    <div id="main-ui" class="hidden">
+        <!-- Navigation Bar -->
+        <div class="nav-bar">
+            <select id="worker-select">
+                <option value="" disabled selected>No Workers</option>
+            </select>
+            <span id="status-badge" class="badge">Disconnected</span>
+            
+            <button id="btn-back">◀</button>
+            <button id="btn-forward">▶</button>
+            <button id="btn-refresh">⟳</button>
+            <button id="btn-resync">⚡ Resync</button>
+
+            <input type="text" id="url-input" placeholder="https://...">
+            
+            <label class="live-toggle">
+                <input type="checkbox" id="chk-live">
+                <span>Live</span>
+            </label>
+            <button id="btn-go">Go</button>
+        </div>
+
+        <!-- Iframe Viewport -->
+        <div class="viewport-container">
+            <iframe id="viewport" sandbox="allow-same-origin allow-scripts allow-forms"></iframe>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
