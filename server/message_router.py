@@ -40,6 +40,7 @@ from shared.models import (
     AlertOpenedMessage,
     TabOpenedMessage,
     TabClosedMessage,
+    ForgetWorkerMessage,
     ErrorMessage,
     PingMessage,
     PongMessage,
@@ -278,7 +279,13 @@ class MessageRouter:
             await self._broadcast_to_subscribers(bound_worker_id, msg)
             return
 
-        # 7. PING / PONG
+        # 7. FORGET_WORKER
+        elif isinstance(msg, ForgetWorkerMessage):
+            worker_id = msg.worker_id
+            await self.worker_mgr.forget_worker(worker_id)
+            return
+
+        # 8. PING / PONG
         elif isinstance(msg, PingMessage):
             await ws.send_text(serialize_message(create_pong(payload=msg.payload)))
             return

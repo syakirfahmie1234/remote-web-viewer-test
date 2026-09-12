@@ -31,6 +31,8 @@ from shared.protocol import (
     MSG_BROWSER_CONFIG,
     MSG_TAB_OPENED,
     MSG_TAB_CLOSED,
+    MSG_FORGET_WORKER,
+    MSG_OBSERVER_COUNT,
     MSG_ALERT_OPENED,
 )
 from shared.models import (
@@ -55,6 +57,8 @@ from shared.models import (
     AlertOpenedMessage,
     TabOpenedMessage,
     TabClosedMessage,
+    ForgetWorkerMessage,
+    ObserverCountMessage,
     generate_message_id,
     get_current_utc_iso,
 )
@@ -595,11 +599,27 @@ def parse_message(raw: Union[str, bytes, Dict[str, Any]]) -> BaseMessage:
         elif msg_type == MSG_TAB_CLOSED:
             return TabClosedMessage(
                 type=MSG_TAB_CLOSED,
-                worker_id=worker_id,
-                tab_handle=str(data.get("tab_handle", "")),
                 message_id=msg_id,
-                timestamp=timestamp,
                 protocol_version=protocol_ver,
+                worker_id=worker_id,
+                tab_handle=data.get("tab_handle", ""),
+            )
+        elif msg_type == MSG_FORGET_WORKER:
+            return ForgetWorkerMessage(
+                type=MSG_FORGET_WORKER,
+                message_id=msg_id,
+                protocol_version=protocol_ver,
+                worker_id=worker_id,
+                timestamp=timestamp,
+            )
+        elif msg_type == MSG_OBSERVER_COUNT:
+            return ObserverCountMessage(
+                type=MSG_OBSERVER_COUNT,
+                message_id=msg_id,
+                protocol_version=protocol_ver,
+                worker_id=worker_id,
+                timestamp=timestamp,
+                count=int(data.get("count", 0)),
             )
         else:
             raise UnknownMessageTypeError(msg_type)
@@ -652,6 +672,25 @@ def create_tab_closed(worker_id: str, tab_handle: str) -> TabClosedMessage:
         type=MSG_TAB_CLOSED,
         worker_id=worker_id,
         tab_handle=tab_handle,
+        message_id=generate_message_id(),
+        timestamp=get_current_utc_iso(),
+        protocol_version=PROTOCOL_VERSION,
+    )
+
+def create_forget_worker(worker_id: str) -> ForgetWorkerMessage:
+    return ForgetWorkerMessage(
+        type=MSG_FORGET_WORKER,
+        worker_id=worker_id,
+        message_id=generate_message_id(),
+        timestamp=get_current_utc_iso(),
+        protocol_version=PROTOCOL_VERSION,
+    )
+
+def create_observer_count(worker_id: str, count: int) -> ObserverCountMessage:
+    return ObserverCountMessage(
+        type=MSG_OBSERVER_COUNT,
+        worker_id=worker_id,
+        count=count,
         message_id=generate_message_id(),
         timestamp=get_current_utc_iso(),
         protocol_version=PROTOCOL_VERSION,

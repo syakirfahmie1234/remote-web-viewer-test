@@ -39,13 +39,20 @@ CLICK_INTERCEPTOR_JS = '''
     window.__click_interceptor_installed = true;
 
     function getUniqueSelector(el) {
-        if (el.id) return '#' + el.id;
+        // 1. Prioritize deterministic IDs from the live Chrome backend
+        if (el.hasAttribute && el.hasAttribute('data-ag-id')) {
+            return '[data-ag-id="' + el.getAttribute('data-ag-id') + '"]';
+        }
+        
+        // 2. Fallback to normal DOM IDs (using attribute selector to avoid numeric ID syntax errors)
+        if (el.id) return '[id="' + el.id + '"]';
+        
         var path = [];
         var current = el;
         while (current && current !== document.body && current !== document.documentElement) {
             var selector = current.tagName.toLowerCase();
             if (current.id) {
-                path.unshift('#' + current.id);
+                path.unshift('[id="' + current.id + '"]');
                 break;
             }
             var index = 1;
@@ -62,6 +69,15 @@ CLICK_INTERCEPTOR_JS = '''
     }
 
     document.addEventListener('click', function(e) {
+        // 1. FORCE CLICK MODIFIER: If user holds a modifier key, bypass checks and send exactly what was clicked
+        if (e.ctrlKey || e.shiftKey || e.altKey || e.metaKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            var selector = getUniqueSelector(e.target);
+            console.log("ANTIGRAVITY_CMD:remote-click:" + btoa(unescape(encodeURIComponent(selector))));
+            return;
+        }
+
         var target = e.target;
         var isClickable = false;
         var current = target;
@@ -77,12 +93,24 @@ CLICK_INTERCEPTOR_JS = '''
             var hasClick = current.hasAttribute('onclick') || current.hasAttribute('ng-click') || current.hasAttribute('@click') || current.hasAttribute('v-on:click');
             var style = window.getComputedStyle(current);
             var cursor = style ? style.cursor : '';
+            
+            // 2. HEURISTIC CLASS MATCHING: Look for common action-oriented class names
+            var className = (current.className && typeof current.className === 'string') ? current.className.toLowerCase() : '';
+            var hasClickableClass = className.indexOf('click') !== -1 || 
+                                    className.indexOf('btn') !== -1 || 
+                                    className.indexOf('button') !== -1 || 
+                                    className.indexOf('action') !== -1 || 
+                                    className.indexOf('nav') !== -1 || 
+                                    className.indexOf('link') !== -1 ||
+                                    className.indexOf('toggle') !== -1 ||
+                                    className.indexOf('toogle') !== -1 ||
+                                    className.indexOf('load') !== -1;
 
             if (
                 tag === 'a' || tag === 'button' ||
                 (tag === 'input' && (type === 'button' || type === 'submit' || type === 'reset' || type === 'checkbox' || type === 'radio')) ||
                 role === 'button' || role === 'link' ||
-                hasClick || cursor === 'pointer'
+                hasClick || cursor === 'pointer' || hasClickableClass
             ) {
                 isClickable = true;
                 target = current;
@@ -202,6 +230,7 @@ class BrowserView(QWidget):
         self.title_label = QLabel("<b>No Worker Selected</b>")
         self.url_label = QLabel("")
         self.url_label.setStyleSheet("color: #0366d6; font-family: monospace;")
+        self.url_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.status_badge = QLabel("Offline")
         self.status_badge.setStyleSheet("padding: 2px 6px; border-radius: 3px; background: #e1e4e8; font-weight: bold;")
 
@@ -214,9 +243,10 @@ class BrowserView(QWidget):
         nav_layout = QHBoxLayout()
         self.btn_back = QPushButton("◀ Back")
         self.btn_forward = QPushButton("Forward ▶")
-        self.btn_refresh = QPushButton("⟳ Refresh")
-        self.btn_resync = QPushButton("⚡ Resync")
+        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_resync = QPushButton("⚠️ Resync")
         self.btn_screenshot = QPushButton("📷 Screenshot")
+        self.btn_restart = QPushButton("💥 Restart Backend")
         self.btn_live = QPushButton("Live")
         self.btn_live.setCheckable(True)
         self.btn_live.setStyleSheet("QPushButton:checked { background-color: #28a745; color: white; font-weight: bold; }")
@@ -230,6 +260,7 @@ class BrowserView(QWidget):
         nav_layout.addWidget(self.btn_refresh)
         nav_layout.addWidget(self.btn_resync)
         nav_layout.addWidget(self.btn_screenshot)
+        nav_layout.addWidget(self.btn_restart)
         nav_layout.addWidget(self.btn_live)
         nav_layout.addWidget(self.url_input, stretch=1)
         nav_layout.addWidget(self.btn_navigate)
@@ -242,6 +273,7 @@ class BrowserView(QWidget):
         self.btn_refresh.clicked.connect(lambda: self.command_requested.emit("refresh", {}))
         self.btn_resync.clicked.connect(lambda: self.resync_requested.emit())
         self.btn_screenshot.clicked.connect(lambda: self.command_requested.emit("screenshot", {}))
+        self.btn_restart.clicked.connect(lambda: self.command_requested.emit("restart_worker", {}))
         self.btn_live.toggled.connect(self._on_live_toggled)
 
 

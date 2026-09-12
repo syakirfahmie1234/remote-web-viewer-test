@@ -6,10 +6,9 @@ Renders and interacts with remote browsers exclusively through WebSocket relay.
 
 from __future__ import annotations
 import logging
-from typing import Optional
 from typing import Dict, Optional
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QTimer, QPoint
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -23,6 +22,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QPushButton,
     QSizePolicy,
+    QMenu,
 )
 
 from controller.state_manager import ControllerStateManager
@@ -56,6 +56,7 @@ from shared.messages import (
     create_resync_request,
     create_controller_register,
     create_throttle_config,
+    create_forget_worker,
 )
 from shared.throttle import get_profile
 
@@ -108,6 +109,11 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(self._left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.btn_restart_ctrl = QPushButton("🔄 Restart Controller")
+        self.btn_restart_ctrl.setToolTip("Relaunch the PySide6 Controller application.")
+        self.btn_restart_ctrl.clicked.connect(self._restart_controller)
+        left_layout.addWidget(self.btn_restart_ctrl)
+
         workers_box = QGroupBox("Connected Workers")
         wb_layout = QVBoxLayout(workers_box)
         self.worker_list = QListWidget()
@@ -115,6 +121,7 @@ class MainWindow(QMainWindow):
             "QListWidget::item { padding: 8px; border-bottom: 1px solid #eee; font-family: monospace; font-size: 12px; }"
             "QListWidget::item:selected { background: #0366d6; color: white; }"
         )
+        self.worker_list.setContextMenuPolicy(Qt.CustomContextMenu)
         wb_layout.addWidget(self.worker_list)
         left_layout.addWidget(workers_box)
         root_layout.addWidget(self._left_panel)
@@ -182,10 +189,9 @@ class MainWindow(QMainWindow):
         # Worker Manager Signals
         self.worker_mgr.workers_updated.connect(self._refresh_worker_list_ui)
         self.worker_mgr.active_worker_changed.connect(self._on_active_worker_changed)
-        self.worker_list.itemClicked.connect(self._on_worker_item_clicked)
-
         # UI Signals
         self.worker_list.itemClicked.connect(self._on_worker_item_clicked)
+        self.worker_list.customContextMenuRequested.connect(self._on_worker_list_context_menu)
         self.command_queue.command_failed.connect(self._on_command_failed)
         self.command_queue.queue_updated.connect(self._on_queue_updated)
 
@@ -194,6 +200,12 @@ class MainWindow(QMainWindow):
         shortcut_highlight.activated.connect(
             lambda: self.command_panel.btn_highlight.click() if self.command_panel else None
         )
+
+        # Debounce timer for UI refresh
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._do_refresh_worker_list_ui)
+
 
     # Slots & Event Handlers
 
@@ -254,28 +266,6 @@ class MainWindow(QMainWindow):
                 self._update_tab_view_from_state(msg.worker_id)
             self._refresh_worker_list_ui()
 
-        elif type(msg).__name__ == "TabOpenedMessage":
-            self.state_mgr.apply_tab_opened(msg)
-            if tab:
-                tab.add_browser_tab(msg.tab_handle, msg.tab_title)
-                tab.set_active_browser_tab(msg.tab_handle)
-                tab.stats_panel.append_log(f"Tab Opened: {msg.tab_handle} ({msg.tab_title})", "INFO")
-
-        elif type(msg).__name__ == "TabClosedMessage":
-            self.state_mgr.apply_tab_closed(msg)
-            if tab:
-                tab.remove_browser_tab(msg.tab_handle)
-                tab.stats_panel.append_log(f"Tab Closed: {msg.tab_handle}", "INFO")
-                self._update_tab_view_from_state(msg.worker_id)
-
-        elif type(msg).__name__ == "AlertOpenedMessage":
-            slot = self.state_mgr.get_or_create_slot(msg.worker_id)
-            slot.alert_text = msg.alert_text
-            self.state_mgr.update_status(msg.worker_id, "alert_blocking", None)
-            if tab:
-                tab.stats_panel.append_log(f"ALERT DETECTED on '{msg.worker_id}': {msg.alert_text}", "ALERT")
-                self._update_tab_view_from_state(msg.worker_id)
-            self._refresh_worker_list_ui()
 
         elif type(msg).__name__ == "FullSnapshotMessage":
             byte_size = len(msg.html)  # Rough payload size estimate
@@ -325,6 +315,58 @@ class MainWindow(QMainWindow):
             if tab:
                 tab.stats_panel.append_log(f"Error from '{msg.worker_id}': {msg.code} - {msg.detail}", "ERROR")
 
+    @Slot(QPoint)
+    def _on_worker_list_context_menu(self, pos: QPoint) -> None:
+        item = self.worker_list.itemAt(pos)
+        if not item:
+            return
+
+        worker_id = item.data(Qt.UserRole)
+        if not worker_id:
+            return
+
+        # Check if worker is online
+        is_connected = False
+        workers = self.worker_mgr.get_known_workers()
+        for w in workers:
+            if w['worker_id'] == worker_id:
+                if w['status'] == 'connected':
+                    is_connected = True
+                break
+
+        menu = QMenu(self)
+        forget_action = menu.addAction("🗑️ Forget Offline Worker")
+        if is_connected:
+            forget_action.setEnabled(False)
+            forget_action.setToolTip("Cannot forget a worker that is currently connected.")
+
+        action = menu.exec(self.worker_list.mapToGlobal(pos))
+        if action == forget_action:
+            reply = QMessageBox.question(
+                self,
+                "Forget Offline Worker",
+                f"Are you sure you want to forget and remove '{worker_id}'?\n\nIt will reappear automatically if it ever reconnects.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.ws_client.send_message(create_forget_worker(worker_id))
+                self.worker_mgr.forget_worker(worker_id)
+                self.state_mgr.forget_worker(worker_id)
+                
+                # Close its tab if open
+                for i in range(self.tabs.count()):
+                    tab = self.tabs.widget(i)
+                    if hasattr(tab, "worker_id") and tab.worker_id == worker_id:
+                        self.tabs.removeTab(i)
+                        tab.deleteLater()
+                        if worker_id in self.worker_tabs:
+                            del self.worker_tabs[worker_id]
+                        break
+                        
+                self._update_server_subscriptions()
+                self._refresh_worker_list_ui()
+
     @Slot(QListWidgetItem)
     def _on_worker_item_clicked(self, item: QListWidgetItem) -> None:
         worker_id = item.data(Qt.UserRole)
@@ -349,7 +391,6 @@ class MainWindow(QMainWindow):
             
         if new_worker_id not in self.worker_tabs:
             tab = self._create_worker_tab(new_worker_id)
-            self.tabs.setCurrentWidget(tab)
             self._update_server_subscriptions()
             
             slot = self.state_mgr.get_slot(new_worker_id)
@@ -357,8 +398,6 @@ class MainWindow(QMainWindow):
                 self.ws_client.send_message(
                     create_resync_request(worker_id=new_worker_id, reason="worker_switch_stale")
                 )
-        else:
-            self.tabs.setCurrentWidget(self.worker_tabs[new_worker_id])
             
         tab = self.worker_tabs.get(new_worker_id)
 
@@ -521,23 +560,63 @@ class MainWindow(QMainWindow):
         )
     @Slot()
     def _refresh_worker_list_ui(self) -> None:
-        self.worker_list.clear()
+        if hasattr(self, "_refresh_timer"):
+            self._refresh_timer.start(50)
+        else:
+            self._do_refresh_worker_list_ui()
+
+    @Slot()
+    def _do_refresh_worker_list_ui(self) -> None:
         workers = self.worker_mgr.get_known_workers()
         active_id = self.worker_mgr.active_worker_id
 
+        existing_items = {}
+        for i in range(self.worker_list.count()):
+            item = self.worker_list.item(i)
+            existing_items[item.data(Qt.UserRole)] = item
+
+        worker_ids = {w['worker_id'] for w in workers}
+        
+        # Remove items no longer in known workers
+        for i in range(self.worker_list.count() - 1, -1, -1):
+            item = self.worker_list.item(i)
+            if item.data(Qt.UserRole) not in worker_ids:
+                self.worker_list.takeItem(i)
+
         for worker in workers:
-            label = f"{worker['worker_id']} [{worker['status']}]"
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, worker['worker_id'])
+            w_id = worker['worker_id']
+            label = f"{w_id} [{worker['status']}]"
             
-            if worker['worker_id'] == active_id:
-                font = item.font()
+            if w_id in existing_items:
+                item = existing_items[w_id]
+                item.setText(label)
+            else:
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, w_id)
+                self.worker_list.addItem(item)
+            
+            # Reset colors to default
+            item.setData(Qt.BackgroundRole, None)
+            item.setData(Qt.ForegroundRole, None)
+            font = item.font()
+            font.setBold(False)
+            item.setFont(font)
+            
+            if w_id == active_id:
                 font.setBold(True)
                 item.setFont(font)
                 item.setBackground(Qt.yellow)
                 item.setForeground(Qt.black)
 
-            self.worker_list.addItem(item)
+    @Slot()
+    def _restart_controller(self) -> None:
+        import sys
+        import subprocess
+        logger.info("Restarting Controller PySide6 application...")
+        # Start a new instance of the current script
+        subprocess.Popen([sys.executable] + sys.argv)
+        # Close the current window gracefully
+        self.close()
 
     def closeEvent(self, event) -> None:
         """Clean shutdown on window close."""

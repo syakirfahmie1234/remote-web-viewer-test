@@ -30,6 +30,8 @@ from shared.protocol import (
     MSG_ALERT_OPENED,
     MSG_TAB_OPENED,
     MSG_TAB_CLOSED,
+    MSG_FORGET_WORKER,
+    MSG_OBSERVER_COUNT,
     ALL_DOM_DIFF_OPS,
     ALL_ROLES,
     ALL_WORKER_STATUSES,
@@ -357,5 +359,18 @@ class TabClosedMessage(WorkerScopedMessage):
 
     def __post_init__(self) -> None:
         self.type = MSG_TAB_CLOSED
+        super().__post_init__()
+
+@dataclass
+class ForgetWorkerMessage(WorkerScopedMessage):
+    def __post_init__(self) -> None:
+        self.type = MSG_FORGET_WORKER
+        super().__post_init__()
+
+@dataclass
+class ObserverCountMessage(WorkerScopedMessage):
+    count: int = 0
+    def __post_init__(self) -> None:
+        self.type = MSG_OBSERVER_COUNT
         super().__post_init__()
 

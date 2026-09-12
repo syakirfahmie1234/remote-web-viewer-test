@@ -28,6 +28,8 @@ MSG_BROWSER_CONFIG: Final[str] = "browser_config"
 MSG_ALERT_OPENED: Final[str] = "alert_opened"
 MSG_TAB_OPENED: Final[str] = "tab_opened"
 MSG_TAB_CLOSED: Final[str] = "tab_closed"
+MSG_FORGET_WORKER: Final[str] = "forget_worker"
+MSG_OBSERVER_COUNT: Final[str] = "observer_count"
 
 # Set of all valid message types
 ALL_MESSAGE_TYPES: Final[FrozenSet[str]] = frozenset({
@@ -49,6 +51,8 @@ ALL_MESSAGE_TYPES: Final[FrozenSet[str]] = frozenset({
     MSG_ALERT_OPENED,
     MSG_TAB_OPENED,
     MSG_TAB_CLOSED,
+    MSG_FORGET_WORKER,
+    MSG_OBSERVER_COUNT,
 })
 
 # Worker-scoped message types where worker_id is strictly MANDATORY
@@ -118,6 +122,7 @@ CMD_SEND_ALERT_TEXT: Final[str] = "send_alert_text"
 CMD_SWITCH_TAB: Final[str] = "switch_tab"
 CMD_NEW_TAB: Final[str] = "new_tab"
 CMD_CLOSE_TAB: Final[str] = "close_tab"
+CMD_RESTART_WORKER: Final[str] = "restart_worker"
 
 COMMAND_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     CMD_NAVIGATE,
@@ -139,6 +144,7 @@ COMMAND_ALLOWLIST: Final[FrozenSet[str]] = frozenset({
     CMD_SWITCH_TAB,
     CMD_NEW_TAB,
     CMD_CLOSE_TAB,
+    CMD_RESTART_WORKER,
 })
 
 # Forbidden commands - explicitly rejected to prevent arbitrary execution

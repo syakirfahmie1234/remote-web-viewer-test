@@ -68,3 +68,15 @@ class ControllerWorkerManager(QObject):
             logger.info(f"Switched active worker to '{worker_id}'")
             self.active_worker_changed.emit(worker_id)
             self.workers_updated.emit()
+
+    def forget_worker(self, worker_id: str) -> None:
+        """Remove a worker from known list completely."""
+        if worker_id in self._workers:
+            del self._workers[worker_id]
+            if self._active_worker_id == worker_id:
+                self._active_worker_id = None
+                next_id = next(iter(self._workers), "")
+                self.select_worker(next_id)
+                logger.info(f"Switched active worker to '{next_id}'")
+                self.active_worker_changed.emit(next_id)
+            self.workers_updated.emit()

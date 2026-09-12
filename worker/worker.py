@@ -18,12 +18,13 @@ from worker.config import (
     SERVER_WS_URL,
     TARGET_DOMAIN,
 )
-from worker.browser import BrowserManager
+from worker.browser import BrowserManager, AlertBlockingError
 from worker.websocket_client import WorkerWebSocketClient
 from shared.protocol import (
     MSG_COMMAND,
     MSG_RESYNC_REQUEST,
     STATUS_CRASHED,
+    STATUS_CONNECTED,
 )
 from shared.models import (
     BaseMessage,
@@ -83,6 +84,7 @@ class Worker:
         self._running: bool = False
         self._throttle_profile: ThrottleProfile = get_default_profile()
 
+        self._snapshot_ready: bool = False
         self.dom_tracker = DOMMutationTracker(self.browser, self.worker_id)
         
         # Guard for Python state updates (snapshot tracking, version bumps)
@@ -95,8 +97,12 @@ class Worker:
         self._last_snapshot_html: str = ""
         self._last_snapshot_url: str = ""
         self._known_window_handles: set[str] = set()
+        self._command_executing: bool = False
         self._navigation_in_progress: bool = False
         self._mutation_task: Optional[asyncio.Task] = None
+        
+        self._observer_count: int = 1
+        self._idle_task: Optional[asyncio.Task] = None
 
         # Register callbacks
         self.ws_client.set_lifecycle_callbacks(
@@ -153,6 +159,23 @@ class Worker:
         logger.info(f"Connected to server. Dispatching initial FULL_SNAPSHOT for '{self.worker_id}'")
         try:
             await self.send_full_snapshot()
+            
+            # Flush the stale mutation buffer from during the outage
+            async with self._selenium_lock:
+                if await asyncio.to_thread(self.browser.is_alive):
+                    await asyncio.to_thread(self.dom_tracker.drain_mutations)
+            
+            self._snapshot_ready = True
+        except AlertBlockingError as e:
+            logger.warning(f"Reconnect snapshot blocked by active alert: {e}")
+            try:
+                from shared.messages import create_alert_opened
+                from shared.protocol import STATUS_ALERT_BLOCKING
+                await self.ws_client.send_message(create_alert_opened(self.worker_id, str(e)))
+                await self.ws_client.send_message(create_worker_status(self.worker_id, STATUS_ALERT_BLOCKING))
+            except Exception:
+                pass
+            self._snapshot_ready = True
         except Exception as e:
             logger.error(f"Failed to send initial snapshot upon connect: {e}")
 
@@ -161,13 +184,15 @@ class Worker:
         Triggered when WebSocket connection is lost.
         Chrome browser remains running and untouched.
         """
+        self._snapshot_ready = False
         logger.info(f"WebSocket disconnected from server. Chrome browser remains active.")
 
     async def send_full_snapshot(self) -> None:
         """
         Capture current page source from Chrome and send FULL_SNAPSHOT to server.
         """
-        if not self.browser.is_alive():
+        is_alive = await asyncio.to_thread(self.browser.is_alive)
+        if not is_alive:
             logger.error("Cannot capture snapshot: Chrome browser session is dead. Initiating crash recovery...")
             await self._recover_from_browser_crash()
             return
@@ -232,18 +257,67 @@ class Worker:
 
         async with self._state_lock:
             self.dom_version = 0
+            
+        try:
+            await self.ws_client.send_message(
+                create_worker_status(worker_id=self.worker_id, status=STATUS_CONNECTED, dom_version=0)
+            )
+        except Exception:
+            pass
+            
         await self.send_full_snapshot()
         logger.info(f"Crash recovery complete for '{self.worker_id}'")
+
+    async def _idle_countdown(self) -> None:
+        """Wait 5 seconds when unobserved, then clean up to save resources."""
+        try:
+            await asyncio.sleep(5.0)
+            logger.info("Worker has been unobserved for 5 seconds. Initiating idle cleanup.")
+            async with self._selenium_lock:
+                try:
+                    await asyncio.to_thread(self.browser.navigate, "chrome://new-tab-page/")
+                except Exception as e:
+                    logger.error(f"Failed to auto-navigate to new tab page during idle cleanup: {e}")
+            logger.info("Worker is now idle at chrome://new-tab-page/")
+        except asyncio.CancelledError:
+            pass
 
     async def _handle_server_message(self, msg: BaseMessage) -> None:
         """
         Dispatch incoming server messages (commands, resync requests).
         """
+        from shared.messages import ObserverCountMessage
+        if isinstance(msg, ObserverCountMessage):
+            logger.info(f"Observer count updated: {msg.count}")
+            self._observer_count = msg.count
+            if self._observer_count == 0:
+                if self._idle_task is None or self._idle_task.done():
+                    self._idle_task = asyncio.create_task(self._idle_countdown())
+            else:
+                if self._idle_task and not self._idle_task.done():
+                    logger.info("Observer reconnected, cancelling idle countdown.")
+                    self._idle_task.cancel()
+            return
+
         if isinstance(msg, ResyncRequestMessage):
             logger.info(f"Received RESYNC_REQUEST for worker '{self.worker_id}' (reason: {msg.reason})")
             await self.send_full_snapshot()
 
         elif isinstance(msg, CommandMessage):
+            if msg.command == "restart_worker":
+                logger.info(f"Received manual RESTART_WORKER command for '{self.worker_id}'. Nuking Chrome session...")
+                try:
+                    await self.ws_client.send_message(create_command_result(
+                        worker_id=self.worker_id,
+                        command=msg.command,
+                        success=True,
+                        payload={"restarted": True}
+                    ))
+                except Exception as e:
+                    logger.error(f"Failed to send restart_worker result: {e}")
+                await self._recover_from_browser_crash()
+                return
+
             async def _process_command():
                 logger.info(f"Executing command '{msg.command}' for worker '{self.worker_id}'")
                 is_nav = msg.command in ("navigate", "back", "forward", "refresh", "switch_tab", "close_tab", "new_tab")
@@ -257,14 +331,21 @@ class Worker:
                 finally:
                     self._command_executing = False
                     
-                await self.ws_client.send_message(result)
-                
-                if not result.success and result.error and result.error.startswith("ALERT_PRESENT"):
-                    from shared.messages import create_alert_opened, create_worker_status
-                    from shared.protocol import STATUS_ALERT_BLOCKING
-                    alert_text = result.error.replace("ALERT_PRESENT: ", "")
-                    await self.ws_client.send_message(create_alert_opened(self.worker_id, alert_text))
-                    await self.ws_client.send_message(create_worker_status(self.worker_id, STATUS_ALERT_BLOCKING))
+                try:
+                    await self.ws_client.send_message(result)
+                    
+                    if not result.success and result.error and result.error.startswith("ALERT_PRESENT"):
+                        from shared.messages import create_alert_opened, create_worker_status
+                        from shared.protocol import STATUS_ALERT_BLOCKING
+                        alert_text = result.error.replace("ALERT_PRESENT: ", "")
+                        await self.ws_client.send_message(create_alert_opened(self.worker_id, alert_text))
+                        await self.ws_client.send_message(create_worker_status(self.worker_id, STATUS_ALERT_BLOCKING))
+                except ConnectionError:
+                    logger.debug(
+                        f"Command '{msg.command}' completed but server offline; "
+                        f"result will sync on next reconnect."
+                    )
+                    return
                 
                 from shared.protocol import CMD_ACCEPT_ALERT, CMD_DISMISS_ALERT, CMD_SEND_ALERT_TEXT
                 if result.success and msg.command in (CMD_ACCEPT_ALERT, CMD_DISMISS_ALERT, CMD_SEND_ALERT_TEXT):
@@ -273,7 +354,7 @@ class Worker:
 
                 if is_nav:
                     async with self._selenium_lock:
-                        if self.browser.is_alive():
+                        if await asyncio.to_thread(self.browser.is_alive):
                             page_source = await asyncio.to_thread(self.browser.get_page_source)
                             await asyncio.to_thread(self.dom_tracker.ensure_injected)
                         else:
@@ -284,7 +365,11 @@ class Worker:
                         async with self._state_lock:
                             self._last_snapshot_html = normalized_html
                     self._navigation_in_progress = False
-                    await self.send_full_snapshot()
+                    
+                    try:
+                        await self.send_full_snapshot()
+                    except ConnectionError:
+                        logger.debug("Server offline during post-command snapshot; will sync on reconnect.")
 
             asyncio.create_task(_process_command())
             
@@ -329,6 +414,14 @@ class Worker:
                 
             async with self._state_lock:
                 self.dom_version = 0
+                
+            try:
+                await self.ws_client.send_message(
+                    create_worker_status(worker_id=self.worker_id, status=STATUS_CONNECTED, dom_version=0)
+                )
+            except Exception:
+                pass
+                
             await self.send_full_snapshot()
             logger.info("Chrome restart with new config complete.")
 
@@ -345,9 +438,18 @@ class Worker:
                 else:
                     await asyncio.sleep(0.1)
                 
-                if not self.ws_client.is_connected or not self.browser.is_alive():
+                # Pause heavy polling if nobody is watching
+                if getattr(self, "_observer_count", 1) == 0:
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                if not self.ws_client.is_connected or not self._snapshot_ready:
                     continue
                     
+                async with self._selenium_lock:
+                    if not await asyncio.to_thread(self.browser.is_alive):
+                        continue
+                        
                 if self._navigation_in_progress:
                     # Discard pending mutations mid-navigation
                     async with self._selenium_lock:
@@ -360,7 +462,7 @@ class Worker:
                     current_url = await asyncio.to_thread(self.browser.get_current_url)
                     current_handle = await asyncio.to_thread(self.browser.get_current_window_handle)
                     
-                    if self._navigation_in_progress or not self.browser.is_alive():
+                    if self._navigation_in_progress or not await asyncio.to_thread(self.browser.is_alive):
                         continue
                         
                     page_source = await asyncio.to_thread(self.browser.get_page_source)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Controller State Manager.
 Maintains synchronized DOM state, versions, stale flags, and metrics independently per worker_id.
 """
@@ -93,8 +93,13 @@ class ControllerStateManager:
         return self._slots[worker_id]
 
     def get_slot(self, worker_id: str) -> Optional[WorkerStateSlot]:
-        """Get existing state slot for worker_id if present."""
+        """Get the state slot for a worker, if it exists."""
         return self._slots.get(worker_id)
+
+    def forget_worker(self, worker_id: str) -> None:
+        """Remove a worker's state completely."""
+        if worker_id in self._slots:
+            del self._slots[worker_id]
 
     def apply_tab_opened(self, msg: TabOpenedMessage) -> None:
         slot = self.get_or_create_slot(msg.worker_id)

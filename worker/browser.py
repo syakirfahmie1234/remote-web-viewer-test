@@ -19,6 +19,10 @@ from selenium.common.exceptions import (
     NoSuchWindowException,
 )
 
+class AlertBlockingError(Exception):
+    """Raised when a browser alert blocks the execution of a command or snapshot."""
+    pass
+
 from worker.config import (
     HEADLESS,
     WINDOW_WIDTH,
@@ -218,6 +222,7 @@ class BrowserManager:
         # Freeze dynamic properties into HTML attributes so page_source captures them
         try:
             self.driver.execute_script('''
+                // 1. Freeze dynamic properties
                 var elems = document.querySelectorAll('input, textarea, select');
                 for (var i = 0; i < elems.length; i++) {
                     var el = elems[i];
@@ -236,10 +241,27 @@ class BrowserManager:
                         }
                     }
                 }
+                
+                // 2. Assign deterministic IDs for precise remote clicking (solves structural nth-child desync)
+                if (typeof window.__ag_counter === "undefined") {
+                    window.__ag_counter = 0;
+                }
+                var allElems = document.querySelectorAll('*');
+                for (var k = 0; k < allElems.length; k++) {
+                    if (!allElems[k].hasAttribute('data-ag-id')) {
+                        allElems[k].setAttribute('data-ag-id', 'ag_' + (window.__ag_counter++));
+                    }
+                }
             ''')
         except Exception:
             pass
-        return self.driver.page_source
+
+        from selenium.common.exceptions import UnexpectedAlertPresentException
+        try:
+            return self.driver.page_source
+        except UnexpectedAlertPresentException as e:
+            alert_text = getattr(e, "alert_text", None)
+            raise AlertBlockingError(alert_text or "unknown")
 
     def get_current_url(self) -> str:
         """Get the current browser URL."""

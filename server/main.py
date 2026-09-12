@@ -10,6 +10,8 @@ from contextlib import asynccontextmanager
 from typing import Dict
 import asyncio
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from server.config import PORT, SESSION_TIMEOUT_SECONDS
@@ -122,6 +124,13 @@ async def websocket_controller_endpoint(websocket: WebSocket) -> None:
     """
     await websocket_manager.handle_controller_connection(websocket)
 
+
+
+@app.get("/")
+async def serve_index():
+    return FileResponse("web_controller/index.html")
+
+app.mount("/static", StaticFiles(directory="web_controller"), name="static")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=PORT)

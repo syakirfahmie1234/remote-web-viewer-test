@@ -101,6 +101,26 @@ class WorkerManager:
                 except Exception as e:
                     logger.debug(f"Failed to notify controller {ctrl_ws} of {worker_id} disconnect: {e}")
 
+    async def forget_worker(self, worker_id: str) -> None:
+        """
+        Permanently remove a disconnected worker from the server's memory.
+        If the worker is still connected, this does nothing.
+        """
+        async with self._lock:
+            if worker_id in self._worker_connections:
+                logger.warning(f"Cannot forget worker '{worker_id}' because it is still connected.")
+                return
+
+            if worker_id in self._worker_states:
+                del self._worker_states[worker_id]
+                logger.info(f"Forgot offline worker: {worker_id}")
+
+            if worker_id in self._worker_subscribers:
+                del self._worker_subscribers[worker_id]
+
+            if worker_id in self._snapshot_throttles:
+                del self._snapshot_throttles[worker_id]
+
     def get_worker_ws(self, worker_id: str) -> Optional[WebSocket]:
         """Get the active WebSocket connection for a given worker_id."""
         return self._worker_connections.get(worker_id)
@@ -113,22 +133,41 @@ class WorkerManager:
         """Get the connection state for a given worker_id."""
         return self._worker_states.get(worker_id)
 
+    async def _notify_worker_observer_count(self, worker_id: str) -> None:
+        ws = self._worker_connections.get(worker_id)
+        if not ws:
+            return
+        count = len(self._worker_subscribers.get(worker_id, set()))
+        from shared.messages import create_observer_count
+        msg = create_observer_count(worker_id, count)
+        try:
+            await ws.send_json(msg.to_dict())
+        except Exception as e:
+            logger.error(f"Failed to send observer count to {worker_id}: {e}")
+
     def add_subscriber(self, worker_id: str, controller_ws: WebSocket) -> None:
         """Subscribe a Controller WebSocket to updates from a specific worker_id."""
         if worker_id not in self._worker_subscribers:
             self._worker_subscribers[worker_id] = set()
         self._worker_subscribers[worker_id].add(controller_ws)
         logger.debug(f"Controller subscribed to {worker_id}. Total subscribers: {len(self._worker_subscribers[worker_id])}")
+        import asyncio
+        asyncio.create_task(self._notify_worker_observer_count(worker_id))
 
     def remove_subscriber(self, worker_id: str, controller_ws: WebSocket) -> None:
         """Unsubscribe a Controller WebSocket from a specific worker_id."""
         if worker_id in self._worker_subscribers:
             self._worker_subscribers[worker_id].discard(controller_ws)
+            import asyncio
+            asyncio.create_task(self._notify_worker_observer_count(worker_id))
 
     def remove_subscriber_from_all(self, controller_ws: WebSocket) -> None:
         """Remove a Controller WebSocket from all worker subscription sets upon disconnect."""
-        for subscribers in self._worker_subscribers.values():
-            subscribers.discard(controller_ws)
+        import asyncio
+        for worker_id, subscribers in self._worker_subscribers.items():
+            if controller_ws in subscribers:
+                subscribers.discard(controller_ws)
+                asyncio.create_task(self._notify_worker_observer_count(worker_id))
 
     def get_subscribers(self, worker_id: str) -> Set[WebSocket]:
         """Get all Controller WebSockets subscribed to a given worker_id."""
